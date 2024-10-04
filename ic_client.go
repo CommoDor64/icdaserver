@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/aviate-labs/agent-go"
 	cert "github.com/aviate-labs/agent-go/certification"
@@ -82,17 +83,21 @@ func (a Agent) Store(arg0 string, arg1 Object) (*Result1, error) {
 	}
 	return &r0, nil
 }
-func VerifyDataFromIC(certificate []byte, rootKey []byte, canister principal.Principal, witness []byte) (cert.Certificate, error) {
+func VerifyDataFromIC(certificate []byte, rootKey []byte, canister principal.Principal, witness []byte, data []byte) (cert.Certificate, error) {
 
 	var c cert.Certificate
 	if err := cbor.Unmarshal(certificate, &c); err != nil {
 		return c, err
 	}
 
+	// Step 1: vetify the certification/signature. Typically you'd use cert.VerifyCertifiedData(...) function
+	// but here we must drill into the hash tree and show inclusion using the witness
 	if err := cert.VerifyCertificate(c, canister, rootKey); err != nil {
+		log.Println(err)
 		return c, err
 	}
 
+	// Step 2:	Showing inclusion in the hashtree, as only the root hash of the hashtree is certified.
 	providedRootHash, err := c.Tree.Lookup(
 		hashtree.Label("canister"),
 		canister.Raw,
@@ -101,28 +106,20 @@ func VerifyDataFromIC(certificate []byte, rootKey []byte, canister principal.Pri
 		return c, err
 	}
 
+	var rootHash [32]byte
+	copy(rootHash[:], providedRootHash)
+
 	ht, err := hashtree.Deserialize(witness)
 	if err != nil {
 		return c, err
 	}
-
-	//FIXME! check inclusion!!
-
-	// h := sha256.New()
-	// h.Write(cb.Data)
-	// dataHash := h.Sum(nil)
-
-	// if _, err := hashtree.Lookup(ht, hashtree.Label(hex.EncodeToString(dataHash))); err != nil {
-	// 	panic(errors.New(fmt.Sprintf("couldn't find hash %x in hashtree", dataHash)))
-	// }
-
-	var rootHash [32]byte
-	copy(rootHash[:], providedRootHash)
-
 	witnessHash := ht.Reconstruct()
+
 	if witnessHash != rootHash {
 		return c, errors.New(fmt.Sprintf("witness hash %x doesn't match known root hash %x", witnessHash, rootHash))
 	}
 
+	fmt.Println(hashtree.AllPaths(ht))
+	fmt.Println(string(data))
 	return c, nil
 }

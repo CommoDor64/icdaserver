@@ -241,7 +241,7 @@ func (d *DASService) CommitChunkedStore(args *CommitChunkedStoreArgs) (*CommitCh
 		panic(err)
 	}
 
-	_, err = VerifyDataFromIC(cb.Certificate, d.Agent.GetRootKey(), d.Canister, cb.Witness)
+	_, err = VerifyDataFromIC(cb.Certificate, d.Agent.GetRootKey(), d.Canister, cb.Witness, dastree.Hash(batch.Data).Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +291,7 @@ func RESTHandler(service *DASService) func(http.ResponseWriter, *http.Request) {
 			panic(err)
 		}
 
-		_, err = VerifyDataFromIC(cb.Certificate, service.Agent.GetRootKey(), service.Canister, cb.Witness)
+		_, err = VerifyDataFromIC(cb.Certificate, service.Agent.GetRootKey(), service.Canister, cb.Witness, dastree.Hash(cb.Data).Bytes())
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
