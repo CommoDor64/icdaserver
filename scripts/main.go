@@ -61,8 +61,14 @@ func SerializeRootKey() {
 		return
 	}
 
-	filePath := filepath.Join("..", "keyset.json")
+	filePath := filepath.Join("/", "generated", "keyset.json")
 
+	dir := filepath.Dir(filePath)
+    if err := os.MkdirAll(dir, 0755); err != nil {
+        fmt.Println("Error creating directory:", err)
+        return
+    }
+	
 	file, err := os.Create(filePath)
 	if err != nil {
 		fmt.Println("Error creating file:", err)
