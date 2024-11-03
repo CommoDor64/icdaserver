@@ -5,10 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,7 +54,6 @@ func (b *Batches) CreateSlot(timeout uint) int {
 		Data:    nil,
 		Timeout: timeout,
 	})
-	fmt.Println("return slotID", slotId)
 	return slotId
 }
 
@@ -65,9 +64,6 @@ func (b *Batches) InsertToSlot(id int, data []byte) int {
 	if id >= len(b.batches) {
 		return -1
 
-	}
-	if len(b.batches) > 0 {
-		fmt.Println(id)
 	}
 
 	if b.batches[id].State != StateCreated {
@@ -148,8 +144,9 @@ var BCOUNTER = Batcher{
 }
 
 type DASService struct {
-	Agent    *Agent
-	Canister principal.Principal
+	Agent      *Agent
+	Canister   principal.Principal
+	keysetHash string
 	Batcher
 }
 
@@ -203,18 +200,17 @@ type CommitChunkedStoreArgs struct {
 	Signature []byte `json:"sig,omitempty"`
 }
 type CommitChunkedStoreReply struct {
-	DataHash    string `json:"dataHash,omitempty"`    //[]byte
-	Timeout     string `json:"timeout,omitempty"`     //uint64
-	SignersMask string `json:"signersMask,omitempty"` //uint64
-	KeysetHash  string `json:"keysetHash,omitempty"`  //[]byte
-	Signature   string `json:"sig,omitempty"`         //[]byte
-	Version     string `json:"version,omitempty"`     //uint64
+	DataHash    string `json:"dataHash,omitempty"`    //real type []byte
+	Timeout     string `json:"timeout,omitempty"`     //real type uint64
+	SignersMask string `json:"signersMask,omitempty"` //real type  uint64
+	KeysetHash  string `json:"keysetHash,omitempty"`  //real type []byte
+	Signature   string `json:"sig,omitempty"`         //real type []byte
+	Version     string `json:"version,omitempty"`     //real type uint64
 }
 
 func (d *DASService) CommitChunkedStore(args *CommitChunkedStoreArgs) (*CommitChunkedStoreReply, error) {
 	log.Println("das_commitChunkedStore called")
 
-	// FIXME not parallelism safe
 	batch, err := BCOUNTER.GetBatchById(args.BatchId)
 	if err != nil {
 		panic(err)
@@ -232,9 +228,6 @@ func (d *DASService) CommitChunkedStore(args *CommitChunkedStoreArgs) (*CommitCh
 	}
 
 	blockHash := h
-	// if h == [32]byte{} {
-	// 	return nil, errors.New(fmt.Sprintf("expected well formed hash, got %v", blockHash))
-	// }
 
 	cb, err := d.Agent.Fetch(blockHash)
 	if err != nil {
@@ -246,7 +239,6 @@ func (d *DASService) CommitChunkedStore(args *CommitChunkedStoreArgs) (*CommitCh
 		return nil, err
 	}
 
-	//FIXME look at the return later
 	_, err = json.Marshal(cb)
 	if err != nil {
 		panic(err)
@@ -262,15 +254,13 @@ func (d *DASService) CommitChunkedStore(args *CommitChunkedStoreArgs) (*CommitCh
 		panic(err)
 	}
 
-	fmt.Println("0x" + hex.EncodeToString(b))
 	return &CommitChunkedStoreReply{
 		DataHash:    h,
 		Timeout:     "0x" + strconv.FormatUint(uint64(batch.Timeout), 16),
 		SignersMask: "0x1",
-		KeysetHash:  "0xb2fd804a20ccbfcfcb4053db7349d066b5ce00b01a48128754d4131fd5aeb741",
-		// Signature:   "0x" + hex.EncodeToString(SignatureToBytes(sig)),
-		Signature: "0x" + hex.EncodeToString(b),
-		Version:   "0x1",
+		KeysetHash:  d.keysetHash,
+		Signature:   "0x" + hex.EncodeToString(b),
+		Version:     "0x1",
 	}, nil
 }
 
@@ -285,6 +275,12 @@ func RESTHandler(service *DASService) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		hash := strings.Split(r.URL.Path, "/")[2]
+
+		if hash == "" || !strings.HasPrefix(hash, "0x") {
+			log.Println("hash is malformed: expected 0x prefixed hash, got:", hash)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 
 		cb, err := service.Agent.Fetch(hash)
 		if err != nil {
@@ -333,11 +329,6 @@ func JSONRPCHandler(service *DASService) func(http.ResponseWriter, *http.Request
 			err error
 		)
 
-		service, err := NewDASService(DASServiceConfig{
-			Enable:   true,
-			Network:  "http://127.0.0.1:4943/",
-			Canister: "bkyz2-fmaaa-aaaaa-qaaaq-cai",
-		})
 		if err != nil {
 			log.Println(err)
 			return
@@ -385,7 +376,6 @@ func JSONRPCHandler(service *DASService) func(http.ResponseWriter, *http.Request
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			fmt.Println(timeout)
 
 			signature, err := hex.DecodeString(args2[5][2:])
 			if err != nil {
@@ -443,7 +433,6 @@ func JSONRPCHandler(service *DASService) func(http.ResponseWriter, *http.Request
 				return
 			}
 
-			fmt.Println(args.BatchId)
 			reply, err := service.SendChunk(&args)
 			if err != nil {
 				log.Println("can't send chunk", err)
@@ -465,22 +454,21 @@ func JSONRPCHandler(service *DASService) func(http.ResponseWriter, *http.Request
 
 		case "das_commitChunkedStore":
 
-			var args []string
-			if err := json.Unmarshal(req.Params, &args); err != nil {
+			var args2 []string
+			if err := json.Unmarshal(req.Params, &args2); err != nil {
 				http.Error(w, "Invalid das_commitChunkedStore params", http.StatusBadRequest)
 				return
 			}
 
-			var args2 CommitChunkedStoreArgs
-			fmt.Println(args)
-			args2.BatchId, err = strconv.ParseUint(args[0][2:], 16, 64)
+			var args CommitChunkedStoreArgs
+			args.BatchId, err = strconv.ParseUint(args2[0][2:], 16, 64)
 			if err != nil {
 				log.Println("can't decode hex here", err)
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 
-			reply, err := service.CommitChunkedStore(&args2)
+			reply, err := service.CommitChunkedStore(&args)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				return
@@ -496,6 +484,13 @@ func JSONRPCHandler(service *DASService) func(http.ResponseWriter, *http.Request
 			if err := json.NewEncoder(w).Encode(resp); err != nil {
 				log.Println(err)
 			}
+
+			b, err := json.MarshalIndent(resp, "", "  ")
+			if err != nil {
+				log.Println(err)
+			}
+
+			log.Println(string(b))
 		default:
 			http.Error(w, "Method not found", http.StatusNotFound)
 			return
@@ -504,9 +499,10 @@ func JSONRPCHandler(service *DASService) func(http.ResponseWriter, *http.Request
 }
 
 type DASServiceConfig struct {
-	Enable   bool   `koanf:"enable"`
-	Network  string `konaf:"network"`
-	Canister string `konaf:"canister"`
+	Enable     bool   `koanf:"enable"`
+	Network    string `konaf:"network"`
+	Canister   string `konaf:"canister"`
+	KeysetHash string `konaf:"keysetHash"`
 }
 
 func NewDASService(config DASServiceConfig) (*DASService, error) {
@@ -529,17 +525,34 @@ func NewDASService(config DASServiceConfig) (*DASService, error) {
 	}
 
 	return &DASService{
-		Canister: p,
-		Agent:    a,
+		Canister:   p,
+		Agent:      a,
+		keysetHash: config.KeysetHash,
 	}, nil
 }
 
 func main() {
-	service, err := NewDASService(DASServiceConfig{
-		Enable:   true,
-		Network:  "http://127.0.0.1:4943/",
-		Canister: "bkyz2-fmaaa-aaaaa-qaaaq-cai",
-	})
+
+	config := DASServiceConfig{
+		Enable: true,
+	}
+
+	config.Network = os.Getenv("DAS_NETWORK")
+	if config.Network == "" {
+		config.Network = "http://127.0.0.1:4943/"
+	}
+
+	config.Canister = os.Getenv("DAS_CANISTER")
+	if config.Canister == "" {
+		config.Canister = "bkyz2-fmaaa-aaaaa-qaaaq-cai"
+	}
+
+	config.KeysetHash = os.Getenv("DAS_KEYSET_HASH")
+	if config.KeysetHash == "" {
+		config.KeysetHash = "0xb2fd804a20ccbfcfcb4053db7349d066b5ce00b01a48128754d4131fd5aeb741"
+	}
+
+	service, err := NewDASService(config)
 	if err != nil {
 		log.Println(err)
 		return
