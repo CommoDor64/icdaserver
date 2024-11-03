@@ -1,4 +1,4 @@
-module icdaserver
+module github.com/CommoDor64/icdaserver
 
 replace github.com/ethereum/go-ethereum => github.com/OffchainLabs/go-ethereum v1.13.4-0.20240722233008-48de2030c7a6
 
