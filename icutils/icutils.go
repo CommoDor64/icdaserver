@@ -1,4 +1,4 @@
-package main
+package icutils
 
 import (
 	"errors"
@@ -13,6 +13,7 @@ import (
 )
 
 type CertifiedBlock struct {
+	Canister    string `ic:"canister" json:"canister"`
 	Certificate []byte `ic:"certificate" json:"certificate"`
 	Data        []byte `ic:"data" json:"data"`
 	Witness     []byte `ic:"witness" json:"witness"`
@@ -67,22 +68,29 @@ func (a Agent) Fetch(arg0 string) (*CertifiedBlock, error) {
 		return nil, errors.New(*r0.Err)
 	}
 
-	return r0.Ok, nil
+	ret := r0.Ok
+	ret.Canister = a.CanisterId.String()
+	return ret, nil
 }
 
 // Store calls the "store" method on the "test" canister.
-func (a Agent) Store(arg0 string, arg1 Object) (*Result1, error) {
+func (a Agent) Store(arg0 string, arg1 []byte) (*Result1, error) {
 	var r0 Result1
 	if err := a.Agent.Call(
 		a.CanisterId,
 		"store",
-		[]any{arg0, arg1},
+		[]any{arg0, Object{arg1}},
 		[]any{&r0},
 	); err != nil {
 		return nil, err
 	}
 	return &r0, nil
 }
+
+func ToPrincipal(p string) principal.Principal {
+	return principal.MustDecode(p)
+}
+
 func VerifyDataFromIC(certificate []byte, rootKey []byte, canister principal.Principal, witness []byte, data []byte) (cert.Certificate, error) {
 
 	var c cert.Certificate
@@ -119,7 +127,5 @@ func VerifyDataFromIC(certificate []byte, rootKey []byte, canister principal.Pri
 		return c, errors.New(fmt.Sprintf("witness hash %x doesn't match known root hash %x", witnessHash, rootHash))
 	}
 
-	fmt.Println(hashtree.AllPaths(ht))
-	fmt.Println(string(data))
 	return c, nil
 }

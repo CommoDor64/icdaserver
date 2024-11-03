@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"icdaserver/icutils"
 	"log"
 	"net/http"
 	"net/url"
@@ -144,7 +145,7 @@ var BCOUNTER = Batcher{
 }
 
 type DASService struct {
-	Agent      *Agent
+	Agent      *icutils.Agent
 	Canister   principal.Principal
 	keysetHash string
 	Batcher
@@ -200,6 +201,7 @@ type CommitChunkedStoreArgs struct {
 	Signature []byte `json:"sig,omitempty"`
 }
 type CommitChunkedStoreReply struct {
+	Canister    string `json:"canister,omitempty"`    //real type string
 	DataHash    string `json:"dataHash,omitempty"`    //real type []byte
 	Timeout     string `json:"timeout,omitempty"`     //real type uint64
 	SignersMask string `json:"signersMask,omitempty"` //real type  uint64
@@ -219,9 +221,7 @@ func (d *DASService) CommitChunkedStore(args *CommitChunkedStoreArgs) (*CommitCh
 	h := dastree.Hash(batch.Data).Hex()
 	_, err = d.Agent.Store(
 		h,
-		Object{
-			Data: batch.Data,
-		})
+		batch.Data)
 
 	if err != nil {
 		panic(err)
@@ -234,7 +234,7 @@ func (d *DASService) CommitChunkedStore(args *CommitChunkedStoreArgs) (*CommitCh
 		panic(err)
 	}
 
-	_, err = VerifyDataFromIC(cb.Certificate, d.Agent.GetRootKey(), d.Canister, cb.Witness, dastree.Hash(batch.Data).Bytes())
+	_, err = icutils.VerifyDataFromIC(cb.Certificate, d.Agent.GetRootKey(), d.Canister, cb.Witness, dastree.Hash(batch.Data).Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +255,7 @@ func (d *DASService) CommitChunkedStore(args *CommitChunkedStoreArgs) (*CommitCh
 	}
 
 	return &CommitChunkedStoreReply{
+		Canister:    d.Canister.String(),
 		DataHash:    h,
 		Timeout:     "0x" + strconv.FormatUint(uint64(batch.Timeout), 16),
 		SignersMask: "0x1",
@@ -265,6 +266,7 @@ func (d *DASService) CommitChunkedStore(args *CommitChunkedStoreArgs) (*CommitCh
 }
 
 type GetByHashResponse struct {
+	Canister         string `json:"canister,omitempty"`
 	Certificate      []byte `json:"certificate,omitempty"`
 	Witness          []byte `json:"witness,omitempty"`
 	Data             string `json:"data,omitempty"`
@@ -287,7 +289,7 @@ func RESTHandler(service *DASService) func(http.ResponseWriter, *http.Request) {
 			panic(err)
 		}
 
-		_, err = VerifyDataFromIC(cb.Certificate, service.Agent.GetRootKey(), service.Canister, cb.Witness, dastree.Hash(cb.Data).Bytes())
+		_, err = icutils.VerifyDataFromIC(cb.Certificate, service.Agent.GetRootKey(), service.Canister, cb.Witness, dastree.Hash(cb.Data).Bytes())
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -297,6 +299,7 @@ func RESTHandler(service *DASService) func(http.ResponseWriter, *http.Request) {
 		base64.StdEncoding.Encode(encodedData, cb.Data)
 
 		res := GetByHashResponse{
+			Canister:         service.Canister.String(),
 			Certificate:      cb.Certificate,
 			Witness:          cb.Witness,
 			Data:             string(encodedData),
@@ -519,7 +522,7 @@ func NewDASService(config DASServiceConfig) (*DASService, error) {
 
 	p := principal.MustDecode(string(config.Canister))
 
-	a, err := NewAgent(p, aconfig)
+	a, err := icutils.NewAgent(p, aconfig)
 	if err != nil {
 		return nil, err
 	}
