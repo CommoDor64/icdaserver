@@ -1,6 +1,7 @@
 package icutils
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
@@ -34,13 +35,11 @@ type Result1 struct {
 	Err *string `ic:"Err,variant"`
 }
 
-// Agent is a client for the "test" canister.
 type Agent struct {
 	*agent.Agent
 	CanisterId principal.Principal
 }
 
-// NewAgent creates a new agent for the "test" canister.
 func NewAgent(canisterId principal.Principal, config agent.Config) (*Agent, error) {
 	a, err := agent.New(config)
 	if err != nil {
@@ -52,7 +51,6 @@ func NewAgent(canisterId principal.Principal, config agent.Config) (*Agent, erro
 	}, nil
 }
 
-// Fetch calls the "fetch" method on the "test" canister.
 func (a Agent) Fetch(arg0 string) (*CertifiedBlock, error) {
 	var r0 Result
 	if err := a.Agent.Query(
@@ -73,7 +71,6 @@ func (a Agent) Fetch(arg0 string) (*CertifiedBlock, error) {
 	return ret, nil
 }
 
-// Store calls the "store" method on the "test" canister.
 func (a Agent) Store(arg0 string, arg1 []byte) (*Result1, error) {
 	var r0 Result1
 	if err := a.Agent.Call(
@@ -91,7 +88,7 @@ func ToPrincipal(p string) principal.Principal {
 	return principal.MustDecode(p)
 }
 
-func VerifyDataFromIC(certificate []byte, rootKey []byte, canister principal.Principal, witness []byte, data []byte) (cert.Certificate, error) {
+func VerifyDataFromIC(certificate []byte, rootKey []byte, canister principal.Principal, witness []byte, datahash []byte) (cert.Certificate, error) {
 
 	var c cert.Certificate
 	if err := cbor.Unmarshal(certificate, &c); err != nil {
@@ -124,7 +121,26 @@ func VerifyDataFromIC(certificate []byte, rootKey []byte, canister principal.Pri
 	witnessHash := ht.Reconstruct()
 
 	if witnessHash != rootHash {
-		return c, errors.New(fmt.Sprintf("witness hash %x doesn't match known root hash %x", witnessHash, rootHash))
+		return c, fmt.Errorf("witness hash %x doesn't match known root hash %x", witnessHash, rootHash)
+	}
+
+	// Step 3: make sure that the datahash is included in the witness
+	ps, err := hashtree.AllPaths(ht)
+	if err != nil {
+		return c, fmt.Errorf("failed to get all paths of witness: %w", err)
+	}
+
+	foundDatahash := false
+	for _, p := range ps {
+		fmt.Println(p.Path, p.Value)
+		if bytes.Equal(datahash, p.Value) {
+			foundDatahash = true
+			break
+		}
+	}
+
+	if !foundDatahash {
+		return c, fmt.Errorf("data hash not found in witness")
 	}
 
 	return c, nil
