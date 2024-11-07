@@ -2,6 +2,7 @@ package icutils
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -133,8 +134,13 @@ func VerifyDataFromIC(certificate []byte, rootKey []byte, canister principal.Pri
 	fmt.Println("Datahash:", datahash)
 	foundDatahash := false
 	for _, p := range ps {
-		fmt.Println(p.Path, p.Value)
-		if bytes.Equal(datahash, p.Value) {
+		fmt.Println("Path:", p.Path[0].String())
+		p1, err := hex.DecodeString(p.Path[0].String())
+		if err != nil {
+			return c, fmt.Errorf("failed to decode path: %w", err)
+		}
+
+		if bytes.Equal(datahash, p1) {
 			foundDatahash = true
 			break
 		}
