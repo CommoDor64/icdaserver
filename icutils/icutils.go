@@ -130,6 +130,7 @@ func VerifyDataFromIC(certificate []byte, rootKey []byte, canister principal.Pri
 		return c, fmt.Errorf("failed to get all paths of witness: %w", err)
 	}
 
+	fmt.Println("Datahash:", datahash)
 	foundDatahash := false
 	for _, p := range ps {
 		fmt.Println(p.Path, p.Value)
